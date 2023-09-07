@@ -142,7 +142,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
 
         n = len(self.image_files)
         assert n > 0, 'No images found in %s. See %s' % (dataroot, help_url)
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int)  # batch index
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int64)  # batch index
         nb = bi[-1] + 1  # number of batches
 
         self.n = n  # number of images
@@ -195,7 +195,7 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 elif mini > 1:
                     shapes[i] = [1, 1 / mini]
 
-            self.batch_shapes = np.ceil(np.array(shapes) * image_size / stride).astype(np.int) * stride
+            self.batch_shapes = np.ceil(np.array(shapes) * image_size / stride).astype(np.int64) * stride
 
         # Cache labels
         create_datasubset, extract_bounding_boxes, labels_loaded = False, False, False

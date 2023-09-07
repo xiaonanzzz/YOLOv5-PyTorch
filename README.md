@@ -40,8 +40,10 @@ Source code is at [this https URL](https://github.com/AlexeyAB/darknet).
 
 #### Clone and install requirements
 ```bash
-git clone https://github.com/Lornatang/YOLOv4-PyTorch.git
-cd YOLOv4-PyTorch/
+
+conda create -n yolov5 python=3.8
+conda -y install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
+
 pip install -r requirements.txt
 ```
 
