@@ -132,7 +132,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                         t = t.read().splitlines()
                         f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
                 elif os.path.isdir(p):  # folder
-                    f += glob.iglob(p + os.sep + '*.*')
+                    # f += glob.iglob(p + os.sep + '*.*')
+                    f += glob.glob(p + os.sep + '**' + os.sep + '*.*', recursive=True)
                 else:
                     raise Exception('%s does not exist' % p)
             self.image_files = sorted(
@@ -140,8 +141,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (dataroot, e, help_url))
 
+
         n = len(self.image_files)
         assert n > 0, 'No images found in %s. See %s' % (dataroot, help_url)
+        print(' image files: ', self.image_files[:2])
         bi = np.floor(np.arange(n) / batch_size).astype(np.int64)  # batch index
         nb = bi[-1] + 1  # number of batches
 

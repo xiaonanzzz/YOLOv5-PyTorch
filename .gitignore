@@ -171,3 +171,5 @@ configs/SafetyHat-Detection
 
 *.pth
 *.pt
+
+data/

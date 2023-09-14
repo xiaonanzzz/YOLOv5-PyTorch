@@ -126,7 +126,7 @@ def build_targets(p, targets, model):
     tcls, tbox, indices, anch = [], [], [], []
     gain = torch.ones(6, device=targets.device)  # normalized to gridspace gain
     off = torch.tensor([[1, 0], [0, 1], [-1, 0], [0, -1]], device=targets.device).float()  # overlap offsets
-    at = torch.arange(na).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
+    at = torch.arange(na, device=targets.device).view(na, 1).repeat(1, nt)  # anchor tensor, same as .repeat_interleave(nt)
 
     g = 0.5  # offset
     style = 'rect4'
