@@ -27,6 +27,7 @@ import yaml
 from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import logging
 
 from test import evaluate
 from yolov4_pytorch.data import check_anchors
@@ -60,13 +61,31 @@ hyper_parameters = {"lr0": 0.01,  # initial learning rate
                     "shear": 0.0}  # image shear (+/- deg)
 
 
-def train():
-    print(f"Hyper parameters {hyper_parameters}")
+def train(args):
+    print('Training args: \n', args)
+    # prepare running folder 
+    print("Start Tensorboard with `tensorboard --logdir=runs`, view at http://localhost:6006/")
+    if args.exp_name is None:
+        for i in range(1, 100000000):
+            if not os.path.exists(f'{args.runs_path}/exp-{i}'):
+                args.exp_name = f'exp-{i}'
+                break
+    exp_dir = f'{args.runs_path}/{args.exp_name}'
+    tb_writer = SummaryWriter(log_dir=exp_dir)
+
+    logger = logging.getLogger('yolov5/train.py')
+    logger.addHandler(logging.FileHandler(f'{exp_dir}/train.log'))
+
+    logger.info(f"Hyper parameters {hyper_parameters}")
     epochs = args.epochs
     batch_size = args.batch_size
     config_file = args.config_file
     data = args.data
-    weights = "weights/checkpoint.pth" if args.resume and not args.weights else args.weights
+    # prepare path
+    weights = f"{exp_dir}/checkpoint.pth" if args.resume else args.weights
+    save_path = f"{exp_dir}/checkpoint.pth"
+    best_weight_path = f"{exp_dir}/best.pth"
+
     image_size = check_image_size(args.image_size, 32)
     device = select_device(args.device, batch_size=args.batch_size)
 
@@ -140,11 +159,12 @@ def train():
 
     # Initialize distributed training
     if device.type != "cpu" and torch.cuda.device_count() > 1 and torch.distributed.is_available():
+        logger.warn('Using distributed training!')
         torch.distributed.init_process_group(backend="nccl",  # "distributed backend"
                                              # distributed training init method
                                              init_method="tcp://127.0.0.1:18888",
                                              # number of nodes for distributed training
-                                             world_size=1,
+                                             world_size=torch.cuda.device_count(),
                                              # distributed training node rank
                                              rank=0)
         model = torch.nn.parallel.DistributedDataParallel(model)
@@ -277,17 +297,19 @@ def train():
         torch.save({"epoch": epoch,
                     "best_fitness": best_fitness,
                     "state_dict": ema.ema.module.state_dict() if hasattr(ema, "module") else ema.ema.state_dict(),
-                    "optimizer": None if final_epoch else optimizer.state_dict()}, "weights/checkpoint.pth")
+                    "optimizer": None if final_epoch else optimizer.state_dict()}, save_path)
         if (best_fitness == fitness_i) and not final_epoch:
             torch.save({"epoch": -1,
                         "state_dict": ema.ema.module.state_dict() if hasattr(ema, "module") else ema.ema.state_dict(),
-                        "optimizer": None}, "weights/model_best.pth")
+                        "optimizer": None}, best_weight_path)
 
     # Finish
     print(f"{epoch - start_epoch} epochs completed in {(time.time() - start_time) / 3600:.3f} hours.\n")
 
-    torch.distributed.destroy_process_group()
-    torch.cuda.empty_cache()
+    if torch.distributed.is_initialized():
+        # only do this if it is initialized
+        torch.distributed.destroy_process_group()
+        torch.cuda.empty_cache()
     return results
 
 
@@ -315,10 +337,8 @@ if __name__ == "__main__":
                         help="Initial weights path. (default: ``)")
     parser.add_argument("--device", default="",
                         help="device id i.e. `0` or `0,1` or `cpu`. (default: ``).")
+    parser.add_argument('--exp-name', type=str, default=None)
+    parser.add_argument('--runs-path', type=str, default='runs')
     args = parser.parse_args()
-    print(args)
 
-    # Train
-    print("Start Tensorboard with `tensorboard --logdir=runs`, view at http://localhost:6006/")
-    tb_writer = SummaryWriter()
-    train()
+    train(args)

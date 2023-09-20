@@ -25,6 +25,7 @@ import yaml
 from PIL import Image
 from torch.utils.data import Dataset
 from tqdm import tqdm
+import logging
 
 from .common import create_folder
 from .common import exif_size
@@ -37,6 +38,7 @@ help_url = "https://github.com/Lornatang/YOLOv4-PyTorch#train-on-custom-dataset"
 img_formats = [".bmp", ".jpg", ".jpeg", ".png", ".tif", ".dng"]
 vid_formats = ['.mov', '.avi', '.mp4', '.mpg', '.mpeg', '.m4v', '.wmv', '.mkv']
 
+logger = logging.getLogger('yolov5/image')
 
 class LoadImages:  # for inference
     def __init__(self, dataroot, image_size=640):
@@ -141,10 +143,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (dataroot, e, help_url))
 
-
+        logger.warn(f'data path: {dataroot}')
         n = len(self.image_files)
         assert n > 0, 'No images found in %s. See %s' % (dataroot, help_url)
-        print(' image files: ', self.image_files[:2])
+        
         bi = np.floor(np.arange(n) / batch_size).astype(np.int64)  # batch index
         nb = bi[-1] + 1  # number of batches
 
@@ -163,12 +165,14 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                             self.image_files]
 
         # Check cache
-        cache_path = str(Path(self.label_files[0]).parent) + '.cache'  # cached labels
+        cache_path = str(Path(dataroot).with_suffix('.cache'))  # cached labels
         if os.path.isfile(cache_path):
+            logger.warning(f'cache {cache_path} exists, loading cache')
             cache = torch.load(cache_path)  # load
             if cache['hash'] != get_hash(self.label_files + self.image_files):  # dataset changed
                 cache = self.cache_labels(cache_path)  # re-cache
         else:
+            logger.warn(f'no cache found, cache labels at: {cache_path}')
             cache = self.cache_labels(cache_path)  # cache
 
         # Get labels

@@ -58,8 +58,7 @@ def select_device(device="", apex=True, batch_size=None):
     else:
         print("Using CPU")
 
-    print("")  # skip a line
-    return torch.device("cuda:0" if cuda else "cpu")
+    return torch.device("cuda" if cuda else "cpu")
 
 
 def time_synchronized():
