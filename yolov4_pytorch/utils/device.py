@@ -36,29 +36,24 @@ def is_parallel(model):
     return type(model) in (torch.nn.parallel.DataParallel, torch.nn.parallel.DistributedDataParallel)
 
 
-def select_device(device="", apex=True, batch_size=None):
+def select_device(device="cuda", apex=True, batch_size=None):
     # device = "cpu" or "cuda:0"
-    only_cpu = device.lower() == "cpu"
-    if device and not only_cpu:  # if device requested other than "cpu"
-        os.environ["CUDA_VISIBLE_DEVICES"] = device  # set environment variable
+    if device.lower() == "cpu":  # if device requested other than "cpu"
+        print('Using cpus!!!!!!!!!')
+        return torch.device("cpu")
+
+    gpu_count = torch.cuda.device_count()
+
+    if device == "cuda":
+        # using multiple gpus
+        assert batch_size % gpu_count == 0, f"batch size {batch_size} % {gpu_count} != 0"
         assert torch.cuda.is_available(), f"CUDA unavailable, invalid device {device} requested"
 
-    cuda = False if only_cpu else torch.cuda.is_available()
-    if cuda:
-        c = 1024 ** 2  # bytes to MB
-        gpu_count = torch.cuda.device_count()
-        if gpu_count > 1 and batch_size:  # check that batch_size is compatible with device_count
-            assert batch_size % gpu_count == 0, f"batch-size {batch_size} not multiple of GPU count {gpu_count}"
-        x = [torch.cuda.get_device_properties(i) for i in range(gpu_count)]
-        s = "Using CUDA " + ("Apex " if apex else "")
-        for i in range(0, gpu_count):
-            if i == 1:
-                s = " " * len(s)
-            print(f"{s}\n\t+ device:{i} (name=`{x[i].name}`, total_memory={int(x[i].total_memory / c)}MB)")
-    else:
-        print("Using CPU")
+        return torch.device("cuda")
 
-    return torch.device("cuda" if cuda else "cpu")
+    print('single gpu mode!!!')
+    assert int(device) < gpu_count, f'gpu index wrong: {device} >= {gpu_count}'
+    return torch.device(f"cuda:{device}")
 
 
 def time_synchronized():

@@ -18,6 +18,7 @@ from .common import output_to_target
 from .common import scale_coords
 from .common import xywh2xyxy
 from .common import xyxy2xywh
+from .common import yoloxywh2xyxy
 from .device import init_seeds
 from .device import is_parallel
 from .device import select_device
@@ -77,4 +78,5 @@ __all__ = [
     "Ensemble",
     "create_pretrained",
     "initialize_weights",
+    "yoloxywh2xyxy",
 ]

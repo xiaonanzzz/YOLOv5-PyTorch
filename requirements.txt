@@ -21,6 +21,9 @@ pathlib
 setuptools
 google-utils
 
+# for reading files directly from s3
+s3fs
+
 
 # ------------------- Tensorboard ------------------------------
 # tb-nightly

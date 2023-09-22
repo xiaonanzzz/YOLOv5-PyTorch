@@ -172,4 +172,7 @@ configs/SafetyHat-Detection
 *.pth
 *.pt
 
+*.cache
+
 data/
+tmp/

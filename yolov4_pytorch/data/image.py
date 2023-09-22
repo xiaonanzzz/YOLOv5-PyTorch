@@ -210,8 +210,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         pbar = tqdm(self.label_files)
         for i, file in enumerate(pbar):
             l = self.labels[i]  # label
-            if l.shape[0]:
-                assert l.shape[1] == 5, '> 5 label columns: %s' % file
+            if l.shape[0] > 0 and l.shape[1] == 5:
+                assert l.shape[1] == 5, ('> 5 label columns: %s' % file, l.shape)
                 assert (l >= 0).all(), 'negative labels: %s' % file
                 assert (l[:, 1:] <= 1).all(), 'non-normalized or out of bounds coordinate labels: %s' % file
                 if np.unique(l, axis=0).shape[0] < l.shape[0]:  # duplicate rows
@@ -286,7 +286,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 assert (shape[0] > 9) & (shape[1] > 9), 'image size <10 pixels'
                 if os.path.isfile(label):
                     with open(label, 'r') as f:
-                        l = np.array([x.split() for x in f.read().splitlines()], dtype=np.float32)  # labels
+                        lines = [x.split() for x in f.read().splitlines()]
+                        # filter out invalid lines to avoid bugs
+                        lines = [x for x in lines if len(x) == 5]
+                        l = np.array(lines, dtype=np.float32)  # labels
+                    
                 if len(l) == 0:
                     l = np.zeros((0, 5), dtype=np.float32)
                 x[img] = [l, shape]
@@ -307,7 +311,6 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
             # Load mosaic
             img, labels = load_mosaic(self, index)
             shapes = None
-
         else:
             # Load image
             img, (h0, w0), (h, w) = load_image(self, index)

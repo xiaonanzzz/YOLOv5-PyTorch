@@ -75,6 +75,14 @@ def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None):
     clip_coords(coords, img0_shape)
     return coords
 
+def yoloxywh2xyxy(x, img_w, img_h):
+    y = xywh2xyxy(x)
+    y[:, 0] = y[:, 0] * img_w
+    y[:, 2] = y[:, 2] * img_w
+    y[:, 1] = y[:, 1] * img_h
+    y[:, 3] = y[:, 3] * img_h
+    return y
+
 
 def xywh2xyxy(x):
     # Convert nx4 boxes from [x, y, w, h] to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
