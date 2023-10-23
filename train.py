@@ -28,6 +28,9 @@ from torch.cuda import amp
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 import logging
+import pandas as pd
+
+from pathlib import Path
 
 from test import evaluate
 from yolov4_pytorch.data import check_anchors
@@ -60,22 +63,109 @@ hyper_parameters = {"lr0": 0.01,  # initial learning rate
                     "scale": 0.5,  # image scale (+/- gain)
                     "shear": 0.0}  # image shear (+/- deg)
 
+logger = logging.getLogger()
 
-def train(args):
-    print('Training args: \n', args)
-    # prepare running folder 
-    print("Start Tensorboard with `tensorboard --logdir=runs`, view at http://localhost:6006/")
-    if args.exp_name is None:
+
+def parse_arg():
+    parser = argparse.ArgumentParser(usage="\n\tpython train.py --config-file configs/COCO-Detection/yolov5-small.yaml "
+                                           "--data data/coco2017.yaml")
+    parser.add_argument("--epochs", type=int, default=300, help="500500 is YOLOv4 max batches. (default: 300)")
+    parser.add_argument("--batch-size", type=int, default=16,
+                        help="mini-batch size (default: 16), this is the total "
+                             "batch size of all GPUs on the current node when "
+                             "using Data Parallel or Distributed Data Parallel"
+                             "Effective batch size is 64 // batch_size.")
+    parser.add_argument("--config-file", type=str, default="configs/COCO-Detection/yolov5-small.yaml",
+                        help="Neural network profile path. (default: `configs/COCO-Detection/yolov5-small.yaml`)")
+    parser.add_argument("--data", type=str, default="data/coco2017.yaml",
+                        help="Path to dataset. (default: data/coco2017.yaml)")
+    parser.add_argument("--image-size", type=int, default=640,
+                        help="Size of processing picture. (default: 640)")
+    parser.add_argument("--resume", action="store_true",
+                        help="resume training from `weights/checkpoint.pth`")
+    parser.add_argument("--cache-images", action="store_true",
+                        help="cache images for faster training.")
+    parser.add_argument("--weights", type=str, default="",
+                        help="Initial weights path. (default: ``)")
+    parser.add_argument("--device", default="",
+                        help="device id i.e. `0` or `0,1` or `cpu`. (default: ``).")
+    parser.add_argument('--exp-name', type=str, default=None)
+    parser.add_argument('--runs-path', type=str, default='runs')
+    parser.add_argument('--tqdm', type=int, default=1, help='1: tqdm, 0: no tqdm bar')
+    args = parser.parse_args()
+    return args
+
+
+def check_args(args):
+    # always run this to check if input arguments are good
+    if not args.tqdm:
+        os.environ['NO_TQDM'] = '1'
+    
+    print(f'data file and its parent folder structure ...')
+    os.system(f'ls -lha {Path(args.data).parent}')
+    
+    assert Path(args.data).exists()
+
+def prepare_data(args):
+    data = args.data
+    data_p = Path(data)
+
+    print('input data folder content: ... ', flush=True)
+    os.system(f'ls -lha {data_p.parent}')
+
+    # if data_p.is_file():
+    #     if data.endswith('.tar'):
+    #         import tarfile
+    #         with tarfile.open(data, 'r') as tar:
+    #             # Extract all the contents to a target directory
+    #             tar.extractall(path='data')
+    #             data_p = 'data'
+    #     if data.endswith('.yaml'):
+    #         pass
+    with open(data) as f:
+        data_dict = yaml.load(f, Loader=yaml.FullLoader)
+    train_path, val_path = data_dict["train"], data_dict["val"]
+    number_classes, names = int(data_dict["number_classes"]), data_dict["names"]
+    train_image_list, val_image_list = [], []
+
+    data_root = data_p.parent
+    train_path = os.path.join(data_root, train_path)
+    val_path = os.path.join(data_root, val_path)
+    
+    train_image_list = list(pd.read_csv(train_path, header=None)[0].map(lambda x: os.path.join(data_root, x)))
+    val_image_list = list(pd.read_csv(val_path, header=None)[0].map(lambda x: os.path.join(data_root, x)))
+
+    logger.warning(f'{train_path} | {val_path}')
+    logger.warning(f'{len(train_image_list)} | {len(val_image_list)}')
+    logger.warning(f'{train_image_list[0]} | {val_image_list[0]}')
+
+    return train_path, val_path, number_classes, names, train_image_list, val_image_list
+    
+
+def prepare_exp(args):
+    if args.exp_name is None or args.exp_name == 'auto':
         for i in range(1, 100000000):
             if not os.path.exists(f'{args.runs_path}/exp-{i}'):
                 args.exp_name = f'exp-{i}'
                 break
-    exp_dir = f'{args.runs_path}/{args.exp_name}'
-    tb_writer = SummaryWriter(log_dir=exp_dir)
+    exp_dir = Path(f'{args.runs_path}/{args.exp_name}')
+    exp_dir.mkdir(parents=True, exist_ok=True)
 
-    logger = logging.getLogger('yolov5/train.py')
     logger.addHandler(logging.FileHandler(f'{exp_dir}/train.log'))
+    logger.addHandler(logging.StreamHandler())
+    logger.setLevel(logging.INFO)
 
+    logger.info(f'Training args: {args}')
+
+    return exp_dir.absolute()
+
+def train(args):
+    check_args(args)
+    print("Start Tensorboard with `tensorboard --logdir=runs`, view at http://localhost:6006/")
+    exp_dir = prepare_exp(args)
+
+    tb_writer = SummaryWriter(log_dir=exp_dir)
+    
     logger.info(f"Hyper parameters {hyper_parameters}")
     epochs = args.epochs
     batch_size = args.batch_size
@@ -85,16 +175,14 @@ def train(args):
     weights = f"{exp_dir}/checkpoint.pth" if args.resume else args.weights
     save_path = f"{exp_dir}/checkpoint.pth"
     best_weight_path = f"{exp_dir}/best.pth"
+    logger.info(f'locations of path: {weights}, {save_path}, {best_weight_path}')
 
     image_size = check_image_size(args.image_size, 32)
     device = select_device(args.device, batch_size=args.batch_size)
 
-    # Configure
+    # prepare data
     init_seeds(0)
-    with open(data) as f:
-        data_dict = yaml.load(f, Loader=yaml.FullLoader)
-    train_path, val_path = data_dict["train"], data_dict["val"]
-    number_classes, names = int(data_dict["number_classes"]), data_dict["names"]
+    train_path, val_path, number_classes, names, train_image_list, val_image_list = prepare_data(args)
     assert len(names) == number_classes, f"{len(names)} names found, number_classes={number_classes} dataset in {data}"
 
     # Create model
@@ -118,12 +206,13 @@ def train(args):
 
     optimizer.add_param_group({"params": pg1, "weight_decay": hyper_parameters["weight_decay"]})
     optimizer.add_param_group({"params": pg2})
-    print(f"Optimizer groups: {len(pg2)} .bias, {len(pg1)} conv.weight, {len(pg0)} other")
+    logger.info(f"Optimizer groups: {len(pg2)} .bias, {len(pg1)} conv.weight, {len(pg0)} other")
     del pg0, pg1, pg2
 
     # Load Model
     epoch, start_epoch, best_fitness = 0, 0, 0.0
     if os.path.exists(weights):
+        logger.info(f'loading weights from existing given file: {weights}')
         checkpoint = torch.load(weights, map_location=device)  # load checkpoint
 
         # load model
@@ -147,11 +236,12 @@ def train(args):
         # load epochs
         start_epoch = checkpoint["epoch"] + 1
         if epochs < start_epoch:
-            print(f"{weights} has been trained for {checkpoint['epoch']} epochs. "
-                  f"Fine-tuning for {epochs} additional epochs.")
+            logger.info(f"{weights} has been trained for {checkpoint['epoch']} epochs. Fine-tuning for {epochs} additional epochs.")
             epochs += checkpoint["epoch"]  # fine tune additional epochs
 
         del checkpoint
+    else:
+        logger.info(f'!!! using a completely new model weights for training')
 
     # Scheduler https://arxiv.org/pdf/1812.01187.pdf
     lf = lambda x: (((1 + math.cos(x * math.pi / epochs)) / 2) ** 1.0) * 0.8 + 0.2  # cosine
@@ -176,14 +266,16 @@ def train(args):
                                                         hyper_parameters=hyper_parameters,
                                                         augment=True,
                                                         cache=args.cache_images,
-                                                        rect=False)
+                                                        rect=False, 
+                                                        image_list=train_image_list)
     _, val_dataloader = create_dataloader(dataroot=val_path,
                                           image_size=image_size,
                                           batch_size=batch_size,
                                           hyper_parameters=hyper_parameters,
                                           augment=False,
                                           cache=args.cache_images,
-                                          rect=True)
+                                          rect=True, 
+                                          image_list=val_image_list)
 
     mlc = np.concatenate(train_dataset.labels, 0)[:, 0].max()  # max label class
     number_batches = len(train_dataloader)
@@ -223,7 +315,7 @@ def train(args):
               f"{' image size'}")
 
         progress_bar = enumerate(train_dataloader)
-        progress_bar = tqdm(progress_bar, total=number_batches)
+        progress_bar = tqdm(progress_bar, total=number_batches, disable=bool(os.environ.get('NO_TQDM', 0)))
         optimizer.zero_grad()
         for i, (images, targets, paths, _) in progress_bar:
             ni = i + number_batches * epoch  # number integrated batches (since train start)
@@ -285,8 +377,12 @@ def train(args):
         tags = ["train/giou_loss", "train/obj_loss", "train/cls_loss",
                 "metrics/precision", "metrics/recall", "metrics/mAP_0.5", "metrics/mAP_0.5:0.95",
                 "val/giou_loss", "val/obj_loss", "val/cls_loss"]
-        for x, tag in zip(list(mean_losses[:-1]) + list(results), tags):
-            tb_writer.add_scalar(tag, x, epoch)
+        metric_dict = {
+            tag: x for x, tag in zip(list(mean_losses[:-1]) + list(results), tags)
+        }
+        for k, v in metric_dict.items():
+            tb_writer.add_scalar(k, v, epoch)
+        logger.info(f'Metric: epoch={epoch}, {metric_dict}')
 
         # Update best mAP
         fitness_i = fitness(np.array(results).reshape(1, -1))
@@ -314,31 +410,5 @@ def train(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(usage="\n\tpython train.py --config-file configs/COCO-Detection/yolov5-small.yaml "
-                                           "--data data/coco2017.yaml")
-    parser.add_argument("--epochs", type=int, default=300,
-                        help="500500 is YOLOv4 max batches. (default: 300)")
-    parser.add_argument("--batch-size", type=int, default=16,
-                        help="mini-batch size (default: 16), this is the total "
-                             "batch size of all GPUs on the current node when "
-                             "using Data Parallel or Distributed Data Parallel"
-                             "Effective batch size is 64 // batch_size.")
-    parser.add_argument("--config-file", type=str, default="configs/COCO-Detection/yolov5-small.yaml",
-                        help="Neural network profile path. (default: `configs/COCO-Detection/yolov5-small.yaml`)")
-    parser.add_argument("--data", type=str, default="data/coco2017.yaml",
-                        help="Path to dataset. (default: data/coco2017.yaml)")
-    parser.add_argument("--image-size", type=int, default=640,
-                        help="Size of processing picture. (default: 640)")
-    parser.add_argument("--resume", action="store_true",
-                        help="resume training from `weights/checkpoint.pth`")
-    parser.add_argument("--cache-images", action="store_true",
-                        help="cache images for faster training.")
-    parser.add_argument("--weights", type=str, default="",
-                        help="Initial weights path. (default: ``)")
-    parser.add_argument("--device", default="",
-                        help="device id i.e. `0` or `0,1` or `cpu`. (default: ``).")
-    parser.add_argument('--exp-name', type=str, default=None)
-    parser.add_argument('--runs-path', type=str, default='runs')
-    args = parser.parse_args()
-
+    args = parse_arg()
     train(args)

@@ -1,0 +1,25 @@
+# --------------------- If use pip -----------------------------
+Cython
+numpy
+opencv-python-headless
+onnx
+django
+djangorestframework
+matplotlib
+PyYAML
+scipy
+tqdm
+tensorboard
+pillow
+thop
+scikit-image
+# git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI
+pycocotools
+pathlib
+setuptools
+google-utils
+pandas
+
+# for reading files directly from s3
+s3fs
+

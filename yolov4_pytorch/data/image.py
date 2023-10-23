@@ -121,27 +121,34 @@ class LoadImages:  # for inference
         return self.nf  # number of files
 
 
+def get_image_file_list(dataroot):
+    f = []  # image files
+    for p in dataroot if isinstance(dataroot, list) else [dataroot]:
+        p = str(Path(p))  # os-agnostic
+        parent = str(Path(p).parent) + os.sep
+        if os.path.isfile(p):  # file
+            with open(p, 'r') as t:
+                t = t.read().splitlines()
+                f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
+        elif os.path.isdir(p):  # folder
+            # f += glob.iglob(p + os.sep + '*.*')
+            f += glob.glob(p + os.sep + '**' + os.sep + '*.*', recursive=True)
+        else:
+            raise Exception('%s does not exist' % p)
+    image_files = sorted([x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats])
+    return image_files
+
+
 class LoadImagesAndLabels(Dataset):  # for training/testing
-    def __init__(self, dataroot, image_size=640, batch_size=16, augment=False, hyper_parameters=None, rect=False,
+    def __init__(self, dataroot, image_files=None, image_size=640, batch_size=16, augment=False, hyper_parameters=None, rect=False,
                  cache_images=False, stride=32):
         try:
-            f = []  # image files
-            for p in dataroot if isinstance(dataroot, list) else [dataroot]:
-                p = str(Path(p))  # os-agnostic
-                parent = str(Path(p).parent) + os.sep
-                if os.path.isfile(p):  # file
-                    with open(p, 'r') as t:
-                        t = t.read().splitlines()
-                        f += [x.replace('./', parent) if x.startswith('./') else x for x in t]  # local to global path
-                elif os.path.isdir(p):  # folder
-                    # f += glob.iglob(p + os.sep + '*.*')
-                    f += glob.glob(p + os.sep + '**' + os.sep + '*.*', recursive=True)
-                else:
-                    raise Exception('%s does not exist' % p)
-            self.image_files = sorted(
-                [x.replace('/', os.sep) for x in f if os.path.splitext(x)[-1].lower() in img_formats])
+            if image_files is None:
+                image_files = get_image_file_list(dataroot)
         except Exception as e:
             raise Exception('Error loading data from %s: %s\nSee %s' % (dataroot, e, help_url))
+
+        self.image_files = image_files.copy()
 
         logger.warn(f'data path: {dataroot}')
         n = len(self.image_files)
@@ -165,7 +172,11 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                             self.image_files]
 
         # Check cache
-        cache_path = str(Path(dataroot).with_suffix('.cache'))  # cached labels
+        if os.path.isfile(dataroot):
+            cache_path = str(Path(dataroot).with_suffix('.cache')) 
+        else:
+            cache_path = str(dataroot + '.cache')
+
         if os.path.isfile(cache_path):
             logger.warning(f'cache {cache_path} exists, loading cache')
             cache = torch.load(cache_path)  # load
@@ -275,7 +286,8 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
     def cache_labels(self, path='labels.cache'):
         # Cache dataset labels, check images and read shapes
         x = {}  # dict
-        pbar = tqdm(zip(self.image_files, self.label_files), desc='Scanning images', total=len(self.image_files))
+        pbar = tqdm(zip(self.image_files, self.label_files), desc='Scanning images', total=len(self.image_files), 
+                    disable=bool(os.environ.get('NO_TQDM', 0)))
         for (img, label) in pbar:
             try:
                 l = []
@@ -299,7 +311,10 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
                 print('WARNING: %s: %s' % (img, e))
 
         x['hash'] = get_hash(self.label_files + self.image_files)
-        torch.save(x, path)  # save for next time
+        try:
+            torch.save(x, path)  # save for next time
+        except RuntimeError as e:
+            logger.error('cannot save check files, ignoring it, this can happen in sagemaker')
         return x
 
     def __len__(self):
@@ -390,8 +405,9 @@ class LoadImagesAndLabels(Dataset):  # for training/testing
         return torch.stack(img, 0), torch.cat(label, 0), path, shapes
 
 
-def create_dataloader(dataroot, image_size, batch_size, hyper_parameters=None, augment=None, cache=None, rect=None):
+def create_dataloader(dataroot, image_size, batch_size, hyper_parameters=None, augment=None, cache=None, rect=None, image_list=None):
     dataset = LoadImagesAndLabels(dataroot=dataroot,
+                                  image_files=image_list,
                                   image_size=image_size,
                                   batch_size=batch_size,
                                   augment=augment,  # augment images
